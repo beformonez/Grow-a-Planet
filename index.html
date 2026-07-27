@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Миний Гараг</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #060818;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #fff;
+    overflow: hidden;
+  }
+  #stars { position: fixed; inset: 0; z-index: 0; }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100vh; }
+
+  /* HEADER */
+  #header { text-align: center; padding: 10px 12px 2px; flex-shrink: 0; }
+  #stageName {
+    font-size: 22px; font-weight: 900; color: #ffd35c;
+    text-shadow: 0 2px 0 rgba(0,0,0,0.4);
+  }
+  #starsWrap { display:flex; justify-content:center; gap:4px; margin-top:6px; }
+  .starIcon { font-size: 18px; opacity: 0.25; transition: all 0.3s ease; }
+  .starIcon.on { opacity: 1; transform: scale(1.15); }
+
+  /* PLANET */
+  #planetZone { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 4px 0; position: relative; }
+  #energyRow { display:flex; align-items:center; gap:8px; }
+  #energyIcon { font-size: 30px; }
+  #energyCount { font-size: 36px; font-weight: 900; color: #fff; text-shadow: 0 0 18px rgba(140,180,255,0.8); }
+  #canvasHolder {
+    width: 240px; height: 240px; position: relative; margin-top: 2px; touch-action: none;
+  }
+  #floatWrap { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+  .floatText { position: absolute; font-weight: 900; font-size: 20px; color: #fff59d; text-shadow: 0 0 8px rgba(255,220,100,0.9); animation: floatUp 1s ease-out forwards; }
+  @keyframes floatUp { 0% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -60px) scale(1.3); } }
+
+  #confettiCanvas { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+  #levelUpBanner {
+    position: fixed; top: 40%; left: 50%; transform: translate(-50%,-50%) scale(0.5);
+    background: linear-gradient(135deg,#ff9a3c,#ff5c9e);
+    padding: 18px 28px; border-radius: 24px; font-size: 22px; font-weight: 900;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 25; opacity: 0; text-align:center;
+    transition: all 0.4s cubic-bezier(.34,1.56,.64,1); pointer-events:none;
+  }
+  #levelUpBanner.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+
+  /* SHOP */
+  #shop { flex: 1; overflow-y: auto; padding: 8px 10px 90px; -webkit-overflow-scrolling: touch; display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .item {
+    background: linear-gradient(145deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+    border: 2px solid rgba(255,255,255,0.12);
+    border-radius: 18px; padding: 12px 8px; text-align: center;
+    transition: transform 0.1s ease, border-color 0.2s ease, opacity 0.3s ease;
+  }
+  .item.affordable { border-color: #ffd35c; }
+  .item.affordable:active { transform: scale(0.94); }
+  .item.locked { opacity: 0.3; }
+  .icon { font-size: 34px; }
+  .name { font-size: 13px; font-weight: 800; margin-top: 2px; }
+  .cost { font-size: 13px; font-weight: 800; color: #9fe0ff; margin-top: 4px; }
+  .owned { font-size: 11px; color: #ffd35c; margin-top: 2px; font-weight: 700; }
+
+  /* AD BANNER PLACEHOLDER */
+  #adBanner {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 50px;
+    background: rgba(255,255,255,0.06); border-top: 1px solid rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: #6b7399; z-index: 15; letter-spacing: 0.5px;
+  }
+</style>
+</head>
+<body>
+<canvas id="stars"></canvas>
+<canvas id="confettiCanvas"></canvas>
+<div id="levelUpBanner"></div>
+<div id="app">
+  <div id="header">
+    <div id="stageName">Чулуун Гараг</div>
+    <div id="starsWrap"></div>
+  </div>
+
+  <div id="planetZone">
+    <div id="energyRow">
+      <div id="energyIcon">⚡</div>
+      <div id="energyCount">0</div>
+    </div>
+    <div id="canvasHolder">
+      <div id="floatWrap"></div>
+    </div>
+  </div>
+
+  <div id="shop"></div>
+</div>
+<div id="adBanner">Зар байршуулах хэсэг (AdMob)</div>
+
+<script>
+/* ===================== STAR BACKGROUND ===================== */
+const starsCanvas = document.getElementById('stars');
+const sctx = starsCanvas.getContext('2d');
+function resizeStars() { starsCanvas.width = innerWidth; starsCanvas.height = innerHeight; }
+resizeStars();
+window.addEventListener('resize', resizeStars);
+const starList = [];
+for (let i = 0; i < 80; i++) {
+  starList.push({ x: Math.random()*starsCanvas.width, y: Math.random()*starsCanvas.height, r: Math.random()*1.4+0.3, tw: Math.random()*Math.PI*2 });
+}
+function drawStars(t) {
+  sctx.clearRect(0,0,starsCanvas.width,starsCanvas.height);
+  for (const s of starList) {
+    const a = 0.4 + 0.6*Math.abs(Math.sin(t/1000+s.tw));
+    sctx.fillStyle = `rgba(255,255,255,${a})`;
+    sctx.beginPath(); sctx.arc(s.x,s.y,s.r,0,Math.PI*2); sctx.fill();
+  }
+  requestAnimationFrame(drawStars);
+}
+requestAnimationFrame(drawStars);
+
+/* ===================== SOUND (simple, no files) ===================== */
+let audioCtx = null;
+function ensureAudio() { if (!audioCtx) { try { audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} } }
+function playPop() {
+  ensureAudio(); if (!audioCtx) return;
+  const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(520, audioCtx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime+0.08);
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+0.15);
+  o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+0.15);
+}
+function playChime() {
+  ensureAudio(); if (!audioCtx) return;
+  [523,659,784,1046].forEach((f,i)=>{
+    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+    o.type = 'triangle'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.001, audioCtx.currentTime + i*0.1);
+    g.gain.linearRampToValueAtTime(0.18, audioCtx.currentTime + i*0.1 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i*0.1 + 0.4);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(audioCtx.currentTime + i*0.1); o.stop(audioCtx.currentTime + i*0.1 + 0.4);
+  });
+}
+
+/* ===================== CONFETTI ===================== */
+const confettiCanvas = document.getElementById('confettiCanvas');
+const cctx = confettiCanvas.getContext('2d');
+function resizeConfetti(){ confettiCanvas.width = innerWidth; confettiCanvas.height = innerHeight; }
+resizeConfetti(); window.addEventListener('resize', resizeConfetti);
+let confettiPieces = [];
+const confettiColors = ['#ff5c9e','#ffd35c','#5cffb0','#5cc9ff','#c25cff'];
+function burstConfetti() {
+  for (let i=0;i<70;i++) {
+    confettiPieces.push({
+      x: innerWidth/2, y: innerHeight*0.4,
+      vx: (Math.random()-0.5)*14, vy: (Math.random()-1.4)*14,
+      size: Math.random()*7+4, color: confettiColors[Math.floor(Math.random()*confettiColors.length)],
+      rot: Math.random()*Math.PI, vr: (Math.random()-0.5)*0.3, life: 100
+    });
+  }
+}
+function tickConfetti() {
+  cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+  confettiPieces = confettiPieces.filter(p => p.life > 0);
+  for (const p of confettiPieces) {
+    p.vy += 0.35; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.life--;
+    cctx.save(); cctx.translate(p.x,p.y); cctx.rotate(p.rot);
+    cctx.fillStyle = p.color; cctx.globalAlpha = Math.min(1, p.life/30);
+    cctx.fillRect(-p.size/2,-p.size/2,p.size,p.size);
+    cctx.restore();
+  }
+  requestAnimationFrame(tickConfetti);
+}
+requestAnimationFrame(tickConfetti);
+
+function showLevelUp(text) {
+  const el = document.getElementById('levelUpBanner');
+  el.textContent = text;
+  el.classList.add('show');
+  burstConfetti();
+  playChime();
+  setTimeout(()=> el.classList.remove('show'), 1800);
+}
+
+/* ===================== GAME DATA (kid-friendly, simple) ===================== */
+let energy = 0;
+let lifetime = 0;
+const clickPower = 1;
+
+const generators = [
+  { id:'volcano', name:'Галт уул', icon:'🌋', baseCost:10, baseRate:0.2, owned:0, minStage:0 },
+  { id:'rain', name:'Бороо', icon:'☁️', baseCost:40, baseRate:1, owned:0, minStage:0 },
+  { id:'fish', name:'Загас', icon:'🐟', baseCost:150, baseRate:4, owned:0, minStage:1 },
+  { id:'tree', name:'Мод', icon:'🌳', baseCost:500, baseRate:12, owned:0, minStage:2 },
+  { id:'animal', name:'Амьтад', icon:'🦁', baseCost:1500, baseRate:35, owned:0, minStage:3 },
+  { id:'city', name:'Хот', icon:'🏙️', baseCost:6000, baseRate:100, owned:0, minStage:4 },
+  { id:'rocket', name:'Ракет', icon:'🚀', baseCost:25000, baseRate:400, owned:0, minStage:5 },
+];
+
+const stages = [
+  { name:'Чулуун Гараг', threshold:0 },
+  { name:'Далайн Гараг', threshold:150 },
+  { name:'Амьдралтай Гараг', threshold:1200 },
+  { name:'Ногоон Гараг', threshold:6000 },
+  { name:'Амьтдын Гараг', threshold:25000 },
+  { name:'Хотын Гараг', threshold:100000 },
+  { name:'Одон Орны Гараг', threshold:400000 },
+];
+
+function currentStageIndex() {
+  let idx = 0;
+  for (let i=0;i<stages.length;i++) if (lifetime >= stages[i].threshold) idx = i;
+  return idx;
+}
+function cost(gen) { return Math.ceil(gen.baseCost * Math.pow(1.13, gen.owned)); }
+function totalRate() { return generators.reduce((s,g)=> s + g.owned*g.baseRate, 0); }
+function formatNum(n) {
+  if (n < 1000) return Math.floor(n).toString();
+  const units = ['мянга','сая','тэрбум','их наяд'];
+  let u = -1; let v = n;
+  while (v >= 1000 && u < units.length-1) { v/=1000; u++; }
+  return v.toFixed(v<10?1:0) + ' ' + units[u];
+}
+
+/* ===================== 3D PLANET (Three.js) ===================== */
+const holder = document.getElementById('canvasHolder');
+const W = 240, H = 240;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, W/H, 0.1, 100);
+camera.position.set(0, 0.4, 5.2);
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+holder.appendChild(renderer.domElement);
+
+const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(ambient);
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(3, 2, 4);
+scene.add(sun);
+
+const planetGroup = new THREE.Group();
+scene.add(planetGroup);
+
+// Procedural texture generator per stage
+function makeStageTextures(stageIdx) {
+  const w = 512, h = 256;
+  const cnv = document.createElement('canvas'); cnv.width = w; cnv.height = h;
+  const ctx = cnv.getContext('2d');
+  const emCnv = document.createElement('canvas'); emCnv.width = w; emCnv.height = h;
+  const ectx = emCnv.getContext('2d');
+  ectx.fillStyle = '#000000'; ectx.fillRect(0,0,w,h);
+
+  const palette = [
+    { base:'#8a7360', spot:'#5c4a3a' },      // 0 rock
+    { base:'#1f6fa8', spot:'#7a6045' },      // 1 ocean + little land
+    { base:'#1f7fa0', spot:'#2fae7a' },      // 2 life (algae greenish patches)
+    { base:'#2f9fd6', spot:'#2f9e46' },      // 3 forest world (more green land)
+    { base:'#3fa8dd', spot:'#3f9e50' },      // 4 animals (similar, warmer land)
+    { base:'#4fb0e0', spot:'#4a9e55' },      // 5 city world
+    { base:'#5fc0ea', spot:'#57a860' },      // 6 space age
+  ];
+  const p = palette[Math.min(stageIdx, palette.length-1)];
+  ctx.fillStyle = p.base; ctx.fillRect(0,0,w,h);
+
+  let seed = stageIdx * 999 + 13;
+  function rand() { seed = (seed*9301+49297) % 233280; return seed/233280; }
+  const blobCount = stageIdx === 0 ? 10 : 7;
+  ctx.fillStyle = p.spot;
+  for (let i=0;i<blobCount;i++) {
+    const bx = rand()*w, by = rand()*h*0.8 + h*0.1;
+    const r = rand()*40 + 20;
+    ctx.beginPath();
+    for (let a=0;a<Math.PI*2;a+=0.5) {
+      const rr = r * (0.7 + rand()*0.6);
+      const x = bx + Math.cos(a)*rr, y = by + Math.sin(a)*rr;
+      if (a===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+
+  if (stageIdx >= 5) {
+    ectx.fillStyle = '#ffdd88';
+    for (let i=0;i<40;i++) {
+      const x = rand()*w, y = rand()*h*0.8+h*0.1;
+      ectx.beginPath(); ectx.arc(x,y,1.6,0,Math.PI*2); ectx.fill();
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.needsUpdate = true;
+  const emTex = new THREE.CanvasTexture(emCnv);
+  emTex.needsUpdate = true;
+  return { tex, emTex };
+}
+
+const geo = new THREE.SphereGeometry(1.35, 48, 48);
+let { tex, emTex } = makeStageTextures(0);
+const mat = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: emTex, emissive: new THREE.Color(0xffdd88), emissiveIntensity: 0, roughness: 0.85, metalness: 0.05 });
+const planetMesh = new THREE.Mesh(geo, mat);
+planetGroup.add(planetMesh);
+
+const cloudGeo = new THREE.SphereGeometry(1.42, 32, 32);
+const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent:true, opacity:0.0, roughness:1 });
+const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+planetGroup.add(cloudMesh);
+
+const ringGeo = new THREE.RingGeometry(2.0, 2.35, 64);
+const ringMat = new THREE.MeshBasicMaterial({ color:0xd7c9ff, side: THREE.DoubleSide, transparent:true, opacity:0 });
+const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+ringMesh.rotation.x = Math.PI/2.4;
+planetGroup.add(ringMesh);
+
+const satGeo = new THREE.BoxGeometry(0.12,0.12,0.12);
+const satMat = new THREE.MeshStandardMaterial({ color:0xdfe6ff });
+const sat1 = new THREE.Mesh(satGeo, satMat);
+const sat2 = new THREE.Mesh(satGeo, satMat);
+sat1.visible = false; sat2.visible = false;
+planetGroup.add(sat1); planetGroup.add(sat2);
+
+let satAngle = 0;
+let pulseScale = 1;
+let lastStageIdx = -1;
+
+/* ===================== BUY EFFECTS: decorations + particles ===================== */
+const decorations = { volcano: [], tree: [], animal: [], city: [] };
+const MAX_DECOR = { volcano: 8, tree: 16, animal: 10, city: 10 };
+let particlePool = [];
+let ripplePool = [];
+let rocketPool = [];
+
+function randomSurfacePoint(radius) {
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  const x = radius * Math.sin(phi) * Math.cos(theta);
+  const y = radius * Math.cos(phi);
+  const z = radius * Math.sin(phi) * Math.sin(theta);
+  const pos = new THREE.Vector3(x, y, z);
+  const normal = pos.clone().normalize();
+  return { pos, normal };
+}
+
+function addDecorationAt(type, pos, normal) {
+  let geo, mat2;
+  if (type === 'volcano') { geo = new THREE.ConeGeometry(0.09, 0.2, 8); mat2 = new THREE.MeshStandardMaterial({ color: 0x8b3a2b }); }
+  else if (type === 'tree') { geo = new THREE.ConeGeometry(0.06, 0.16, 6); mat2 = new THREE.MeshStandardMaterial({ color: 0x2f9e46 }); }
+  else if (type === 'animal') { geo = new THREE.SphereGeometry(0.045, 8, 8); mat2 = new THREE.MeshStandardMaterial({ color: 0xc48a4a }); }
+  else if (type === 'city') { geo = new THREE.BoxGeometry(0.08, 0.15, 0.08); mat2 = new THREE.MeshStandardMaterial({ color: 0xcfcfcf, emissive: 0xffdd66, emissiveIntensity: 0.9 }); }
+  const mesh = new THREE.Mesh(geo, mat2);
+  mesh.position.copy(pos);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+  mesh.scale.set(0.001, 0.001, 0.001);
+  planetMesh.add(mesh);
+  decorations[type].push(mesh);
+  if (decorations[type].length > MAX_DECOR[type]) {
+    const old = decorations[type].shift();
+    planetMesh.remove(old);
+  }
+}
+
+function burstAt(worldPos, color, count, speed) {
+  for (let i = 0; i < count; i++) {
+    const geo = new THREE.SphereGeometry(0.02 + Math.random() * 0.02, 6, 6);
+    const mat2 = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+    const m = new THREE.Mesh(geo, mat2);
+    m.position.copy(worldPos);
+    const dir = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.1), (Math.random() - 0.5)).normalize();
+    scene.add(m);
+    particlePool.push({ mesh: m, vel: dir.multiplyScalar(speed * (0.6 + Math.random())), life: 1.0 });
+  }
+}
+
+function burstRipple(worldPos, worldNormal, color) {
+  const geo = new THREE.RingGeometry(0.02, 0.05, 24);
+  const mat2 = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat2);
+  mesh.position.copy(worldPos);
+  mesh.lookAt(worldPos.clone().add(worldNormal));
+  scene.add(mesh);
+  ripplePool.push({ mesh, life: 1.0 });
+}
+
+function launchRocket() {
+  const { pos, normal } = randomSurfacePoint(1.42);
+  const worldPos = planetMesh.localToWorld(pos.clone());
+  const worldNormalPoint = planetMesh.localToWorld(pos.clone().add(normal.clone().multiplyScalar(0.3)));
+  const worldNormal = worldNormalPoint.sub(worldPos).normalize();
+  const geo = new THREE.ConeGeometry(0.05, 0.18, 8);
+  const mat2 = new THREE.MeshStandardMaterial({ color: 0xdddddd });
+  const mesh = new THREE.Mesh(geo, mat2);
+  mesh.position.copy(worldPos);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), worldNormal);
+  scene.add(mesh);
+  rocketPool.push({ mesh, dir: worldNormal.clone(), dist: 0, tick: 0 });
+}
+
+function bumpClouds() {
+  const extra = Math.min(0.15, generators.find(g => g.id === 'rain').owned * 0.01);
+  cloudMat.opacity = Math.min(0.4, cloudMat.opacity + 0.03 + extra * 0.1);
+}
+
+function triggerBuyEffect(gen) {
+  if (gen.id === 'volcano') {
+    const { pos, normal } = randomSurfacePoint(1.36);
+    addDecorationAt('volcano', pos, normal);
+    burstAt(planetMesh.localToWorld(pos.clone()), 0xff7733, 16, 0.028);
+  } else if (gen.id === 'rain') {
+    const { pos } = randomSurfacePoint(1.6);
+    burstAt(planetMesh.localToWorld(pos.clone()), 0x66aaff, 16, 0.02);
+    bumpClouds();
+  } else if (gen.id === 'fish') {
+    const { pos, normal } = randomSurfacePoint(1.36);
+    const worldPos = planetMesh.localToWorld(pos.clone());
+    const worldNormalPoint = planetMesh.localToWorld(pos.clone().add(normal.clone().multiplyScalar(0.3)));
+    const worldNormal = worldNormalPoint.sub(worldPos).normalize();
+    burstRipple(worldPos, worldNormal, 0x55ddee);
+    burstAt(worldPos, 0x55ddee, 10, 0.015);
+  } else if (gen.id === 'tree') {
+    const { pos, normal } = randomSurfacePoint(1.36);
+    addDecorationAt('tree', pos, normal);
+  } else if (gen.id === 'animal') {
+    const { pos, normal } = randomSurfacePoint(1.36);
+    addDecorationAt('animal', pos, normal);
+    burstAt(planetMesh.localToWorld(pos.clone()), 0xd2a679, 8, 0.012);
+  } else if (gen.id === 'city') {
+    const { pos, normal } = randomSurfacePoint(1.36);
+    addDecorationAt('city', pos, normal);
+    burstAt(planetMesh.localToWorld(pos.clone()), 0xffdd66, 10, 0.015);
+  } else if (gen.id === 'rocket') {
+    launchRocket();
+  }
+}
+
+function updatePlanetForStage(idx) {
+  if (idx === lastStageIdx) return;
+  lastStageIdx = idx;
+  const t = makeStageTextures(idx);
+  mat.map = t.tex; mat.emissiveMap = t.emTex; mat.needsUpdate = true;
+  mat.emissiveIntensity = idx >= 5 ? 1.4 : 0;
+  cloudMat.opacity = idx >= 1 ? (idx >= 3 ? 0.22 : 0.15) : 0;
+  ringMat.opacity = idx >= 6 ? 0.85 : 0;
+  sat1.visible = idx >= 5;
+  sat2.visible = idx >= 5;
+}
+
+function animate3D() {
+  requestAnimationFrame(animate3D);
+  planetMesh.rotation.y += 0.004;
+  cloudMesh.rotation.y += 0.0025;
+  ringMesh.rotation.z += 0.001;
+  satAngle += 0.02;
+  sat1.position.set(Math.cos(satAngle)*2.1, Math.sin(satAngle*0.6)*0.4, Math.sin(satAngle)*2.1);
+  sat2.position.set(Math.cos(satAngle+Math.PI)*2.1, Math.sin(satAngle*0.6+1)*0.4, Math.sin(satAngle+Math.PI)*2.1);
+  pulseScale += (1 - pulseScale) * 0.15;
+  planetGroup.scale.set(pulseScale, pulseScale, pulseScale);
+
+  // grow decorations (volcano/tree/animal/city) toward full size
+  for (const type in decorations) {
+    for (const mesh of decorations[type]) {
+      mesh.scale.x += (1 - mesh.scale.x) * 0.1;
+      mesh.scale.y += (1 - mesh.scale.y) * 0.1;
+      mesh.scale.z += (1 - mesh.scale.z) * 0.1;
+    }
+  }
+
+  // particle bursts
+  particlePool = particlePool.filter(p => p.life > 0);
+  for (const p of particlePool) {
+    p.mesh.position.add(p.vel);
+    p.vel.multiplyScalar(0.94);
+    p.vel.y -= 0.0006;
+    p.life -= 0.025;
+    p.mesh.material.opacity = Math.max(0, p.life);
+    const s = Math.max(0.1, p.life * 0.6 + 0.4);
+    p.mesh.scale.set(s, s, s);
+    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose(); }
+  }
+
+  // ripples
+  ripplePool = ripplePool.filter(r => r.life > 0);
+  for (const r of ripplePool) {
+    r.mesh.scale.multiplyScalar(1.06);
+    r.life -= 0.025;
+    r.mesh.material.opacity = Math.max(0, r.life * 0.8);
+    if (r.life <= 0) { scene.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose(); }
+  }
+
+  // rockets
+  rocketPool = rocketPool.filter(r => r.dist < 3.2);
+  for (const r of rocketPool) {
+    const speed = 0.02 + r.dist * 0.015;
+    r.mesh.position.addScaledVector(r.dir, speed);
+    r.dist += speed;
+    r.tick++;
+    if (r.tick % 3 === 0) burstAt(r.mesh.position.clone(), 0xffaa55, 3, 0.008);
+    if (r.dist >= 3.2) { scene.remove(r.mesh); r.mesh.geometry.dispose(); r.mesh.material.dispose(); }
+  }
+
+  renderer.render(scene, camera);
+}
+animate3D();
+
+/* ===================== UI ===================== */
+const stageNameEl = document.getElementById('stageName');
+const starsWrapEl = document.getElementById('starsWrap');
+const energyCountEl = document.getElementById('energyCount');
+const shopEl = document.getElementById('shop');
+const floatWrap = document.getElementById('floatWrap');
+
+stages.forEach(()=> {
+  const s = document.createElement('div');
+  s.className = 'starIcon';
+  s.textContent = '★';
+  starsWrapEl.appendChild(s);
+});
+const starEls = Array.from(starsWrapEl.children);
+
+function renderShop() {
+  const idx = currentStageIndex();
+  shopEl.innerHTML = '';
+  generators.forEach(gen => {
+    const c = cost(gen);
+    const unlocked = idx >= gen.minStage;
+    const affordable = unlocked && energy >= c;
+    const div = document.createElement('div');
+    div.className = 'item ' + (unlocked ? (affordable?'affordable':'') : 'locked');
+    div.innerHTML = `
+      <div class="icon">${unlocked ? gen.icon : '🔒'}</div>
+      <div class="name">${gen.name}</div>
+      <div class="cost">${unlocked ? formatNum(c)+' ⚡' : ''}</div>
+      ${gen.owned>0 ? `<div class="owned">x${gen.owned}</div>` : ''}
+    `;
+    if (unlocked) div.addEventListener('click', ()=> buy(gen));
+    shopEl.appendChild(div);
+  });
+}
+
+function buy(gen) {
+  const c = cost(gen);
+  if (energy >= c) {
+    energy -= c; gen.owned++;
+    playPop();
+    triggerBuyEffect(gen);
+    renderShop(); updateTopBar();
+  }
+}
+
+function updateTopBar() {
+  const idx = currentStageIndex();
+  energyCountEl.textContent = formatNum(energy);
+  if (stageNameEl.textContent !== stages[idx].name) {
+    if (idx > 0) showLevelUp('🎉 ' + stages[idx].name + '!');
+    stageNameEl.textContent = stages[idx].name;
+  }
+  starEls.forEach((el,i)=> el.classList.toggle('on', i <= idx));
+  updatePlanetForStage(idx);
+}
+
+function spawnFloat(text) {
+  const el = document.createElement('div');
+  el.className = 'floatText';
+  el.style.left = '50%';
+  el.style.top = '45%';
+  el.textContent = text;
+  floatWrap.appendChild(el);
+  setTimeout(()=> el.remove(), 1000);
+}
+
+function handleTap() {
+  ensureAudio();
+  const idx = currentStageIndex();
+  const gain = clickPower * (1 + idx*0.1);
+  energy += gain; lifetime += gain;
+  pulseScale = 1.12;
+  spawnFloat('+' + formatNum(gain));
+  playPop();
+  updateTopBar();
+  renderShop();
+}
+renderer.domElement.addEventListener('pointerdown', handleTap);
+
+setInterval(()=>{
+  const rate = totalRate();
+  if (rate > 0) { energy += rate/10; lifetime += rate/10; updateTopBar(); }
+}, 100);
+setInterval(renderShop, 500);
+
+updateTopBar();
+renderShop();
+</script>
+</body>
+</html>
