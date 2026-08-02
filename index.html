@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Burger Rush 🍔 — Stickman Edition</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; overflow: hidden;
+    width: 100%; height: 100%;
+    background: #ffeaa7;
+    font-family: 'Comic Sans MS', 'Chalkboard SE', 'Segoe UI', sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #gameCanvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  #hud {
+    position: fixed; top: 0; left: 0; width: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  #cashBar {
+    position: absolute; top: 16px; left: 16px;
+    background: #2ed573;
+    border: 4px solid #000000;
+    border-radius: 20px;
+    padding: 8px 22px;
+    color: #fff; font-weight: 900; font-size: 26px;
+    box-shadow: 0 6px 0 #000;
+  }
+  #cashBar span { color: #ffffff; }
+  #title {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    color: #ff4757; font-size: 26px; font-weight: 900; letter-spacing: 1px;
+    text-shadow: 3px 3px 0px #000;
+    filter: drop-shadow(0 4px 0 rgba(0,0,0,0.2));
+  }
+  #stats {
+    position: absolute; top: 16px; right: 16px;
+    background: #ffffff;
+    border: 4px solid #000000;
+    border-radius: 16px;
+    padding: 8px 14px;
+    color: #000000; font-weight: 800; font-size: 14px; line-height: 1.4em;
+    text-align: right;
+    box-shadow: 0 6px 0 #000;
+  }
+  #toast {
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+    color: #fff; font-size: 18px; font-weight: 800;
+    background: #ff4757; padding: 10px 20px; border-radius: 30px;
+    border: 4px solid #000;
+    box-shadow: 0 6px 0 #000;
+    opacity: 0; transition: opacity 0.3s, transform 0.3s;
+    transform: translateX(-50%) scale(0.8);
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) scale(1); }
+
+  #joystickBase {
+    position: fixed; bottom: 40px; left: 40px;
+    width: 120px; height: 120px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.8);
+    border: 4px solid #000000;
+    box-shadow: 0 6px 0 #000;
+    z-index: 20; touch-action: none;
+    box-sizing: border-box;
+  }
+  #joystickKnob {
+    position: absolute; top: 50%; left: 50%;
+    width: 50px; height: 50px; border-radius: 50%;
+    background: #ff4757;
+    border: 3px solid #000000;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+  #controlsHint {
+    position: fixed; bottom: 40px; right: 20px;
+    color: #000; font-size: 13px; font-weight: 800; text-align: right;
+    background: #ffffff; padding: 10px 14px; border-radius: 14px;
+    border: 3px solid #000;
+    z-index: 15; max-width: 220px;
+    box-shadow: 0 4px 0 #000;
+  }
+  @media (max-width: 700px) {
+    #controlsHint { display: none; }
+  }
+
+  #loadingOverlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: #ffeaa7;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    transition: opacity 0.4s;
+  }
+  #loadingOverlay.hidden { opacity: 0; pointer-events: none; }
+  #loadingSpinner {
+    width: 56px; height: 56px; border-radius: 50%;
+    border: 8px solid #ff4757; border-top-color: transparent;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 18px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loadingText {
+    color: #2f3542; font-weight: 900; font-size: 18px;
+  }
+</style>
+</head>
+<body>
+
+<div id="loadingOverlay">
+  <div id="loadingSpinner"></div>
+  <div id="loadingText">Firing up the grill…</div>
+</div>
+
+<div id="hud">
+  <div id="title">🍔 BURGER RUSH</div>
+  <div id="cashBar">$<span id="cashVal">0</span></div>
+  <div id="stats">
+    Tables: <span id="tableCount">0/0</span><br>
+    Staff: <span id="workerCount">0</span>
+  </div>
+  <div id="toast"></div>
+</div>
+
+<div id="joystickBase">
+  <div id="joystickKnob"></div>
+</div>
+
+<div id="controlsHint">
+  WASD / Joystick to move<br>
+  Camera follows player! 🎥<br>
+  Cook & Serve Burgers 🍔
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/+esm"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js/+esm?external=three";
+import * as SkeletonUtils from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/SkeletonUtils.js/+esm?external=three";
+
+/* =========================================================================
+   Stickman model is loaded from external stickman.glb (same folder).
+   It has "Idle" and "Run" animation clips.
+   ========================================================================= */
+const STICKMAN_FACING_OFFSET = 0;
+const HUMANOID_HEIGHT = 1.8;
+
+/* ---------------------------- Global state ---------------------------- */
+const state = {
+  cash: 20,
+  workers: 0,
+  maxWorkers: 3,
+  clock: new THREE.Clock(),
+  keys: {},
+  joystick: { active: false, x: 0, y: 0 },
+  playerCarrying: 0,
+  maxCarry: 10,
+  grillTimer: 0,
+  serveTimer: 0,
+  spawnTimer: 0,
+  spawnInterval: 4.5,
+};
+
+const FLOOR_HALF_X = 8.5;
+const FLOOR_MIN_Z = -5.5;
+const FLOOR_MAX_Z = 6.0;
+const DOOR_POS = new THREE.Vector3(0, 0, 6.2);
+
+/* ------------------------------ Renderer ------------------------------ */
+const canvas = document.getElementById('gameCanvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = false;
+renderer.setClearColor(0xfff8e7);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xfff8e7);
+
+/* ------------------------------- Camera -------------------------------- */
+const VIEW_SIZE = 8.5;
+let camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+function setCameraFrustum() {
+  const aspect = window.innerWidth / window.innerHeight;
+  camera.left = -VIEW_SIZE * aspect;
+  camera.right = VIEW_SIZE * aspect;
+  camera.top = VIEW_SIZE;
+  camera.bottom = -VIEW_SIZE;
+  camera.updateProjectionMatrix();
+}
+setCameraFrustum();
+
+const CAM_OFFSET = new THREE.Vector3(12, 14, 12);
+
+/* --------------------------- Helper: OUTLINE BUILDER ---------------------------- */
+// Used for the low-poly props (grill, tables, burgers, walls). Skinned
+// meshes (the stickman) are excluded since a naive outline clone breaks
+// skinning, so humanoids rely on the model's own shading instead.
+function addOutline(mesh, thickness = 0.04, color = 0x000000) {
+  if (!mesh.geometry) return;
+  const outlineMat = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
+  const outlineMesh = new THREE.Mesh(mesh.geometry, outlineMat);
+  outlineMesh.scale.setScalar(1 + thickness);
+  mesh.add(outlineMesh);
+}
+
+function makeCanvasTexture(draw, w = 256, h = 256) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  draw(ctx, w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function makeSprite(text, opts = {}) {
+  const {
+    fontSize = 64, bg = 'rgba(0,0,0,0)', color = '#000',
+    padding = 12, scale = 1.0, bold = true
+  } = opts;
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  ctx.font = `${bold ? '900' : '400'} ${fontSize}px sans-serif`;
+  const metrics = ctx.measureText(text);
+  c.width = Math.ceil(metrics.width) + padding * 2;
+  c.height = fontSize + padding * 2;
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#000000';
+  ctx.strokeRect(0, 0, c.width, c.height);
+
+  ctx.font = `${bold ? '900' : '400'} ${fontSize}px sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = color;
+  ctx.fillText(text, c.width / 2, c.height / 2 + 2);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  const ratio = c.width / c.height;
+  sprite.scale.set(ratio * scale, scale, 1);
+  return sprite;
+}
+
+/* ---------------------------------- Floor -------------------------------- */
+function buildFloor() {
+  const tex = makeCanvasTexture((ctx, w, h) => {
+    const tiles = 8;
+    const s = w / tiles;
+    for (let y = 0; y < tiles; y++) {
+      for (let x = 0; x < tiles; x++) {
+        ctx.fillStyle = (x + y) % 2 === 0 ? '#ffeaa7' : '#fdcb6e';
+        ctx.fillRect(x * s, y * s, s, s);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#000000';
+        ctx.strokeRect(x * s, y * s, s, s);
+      }
+    }
+  }, 512, 512);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(5, 4);
+
+  const floorGeo = new THREE.PlaneGeometry(FLOOR_HALF_X * 2, FLOOR_MAX_Z - FLOOR_MIN_Z);
+  const floorMat = new THREE.MeshBasicMaterial({ map: tex });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, 0, (FLOOR_MAX_Z + FLOOR_MIN_Z) / 2);
+  scene.add(floor);
+
+  const wallMat = new THREE.MeshBasicMaterial({ color: 0xff7675 });
+  const backWall = new THREE.Mesh(new THREE.BoxGeometry(FLOOR_HALF_X * 2, 3.2, 0.4), wallMat);
+  backWall.position.set(0, 1.6, FLOOR_MIN_Z);
+  addOutline(backWall, 0.02);
+  scene.add(backWall);
+
+  const sideMat = new THREE.MeshBasicMaterial({ color: 0xfab1a0 });
+  const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.2, FLOOR_MAX_Z - FLOOR_MIN_Z), sideMat);
+  wallL.position.set(-FLOOR_HALF_X, 1.6, (FLOOR_MAX_Z + FLOOR_MIN_Z) / 2);
+  addOutline(wallL, 0.02);
+  scene.add(wallL);
+
+  const wallR = wallL.clone();
+  wallR.position.x = FLOOR_HALF_X;
+  scene.add(wallR);
+}
+buildFloor();
+
+/* ------------------------------- Grill Counter ---------------------------- */
+function buildGrillCounter() {
+  const group = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.1, 1.4), new THREE.MeshBasicMaterial({ color: 0xff4757 }));
+  base.position.set(0, 0.55, -4.3);
+  addOutline(base, 0.04);
+  group.add(base);
+
+  const top = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.12, 1.6), new THREE.MeshBasicMaterial({ color: 0x2f3542 }));
+  top.position.set(0, 1.16, -4.3);
+  addOutline(top, 0.03);
+  group.add(top);
+
+  const plate = new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), new THREE.MeshBasicMaterial({ color: 0xffa502 }));
+  plate.rotation.x = -Math.PI / 2;
+  plate.position.set(0, 1.23, -4.3);
+  group.add(plate);
+
+  const sign = makeSprite('GRILL 🍔', { fontSize: 60, color: '#ffffff', bg: '#ff4757', scale: 1.2 });
+  sign.position.set(0, 2.2, -4.3);
+  group.add(sign);
+
+  scene.add(group);
+  return { position: new THREE.Vector3(0, 0, -4.3), radius: 2.3 };
+}
+const grillZone = buildGrillCounter();
+
+/* --------------------------------- Burger Mesh ---------------------------- */
+function createBurger(scale = 1) {
+  const g = new THREE.Group();
+  const bunBottom = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.34, 0.14, 14), new THREE.MeshBasicMaterial({ color: 0xeccc68 }));
+  bunBottom.position.y = 0.07; addOutline(bunBottom, 0.06);
+
+  const patty = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.1, 14), new THREE.MeshBasicMaterial({ color: 0x573420 }));
+  patty.position.y = 0.19; addOutline(patty, 0.06);
+
+  const cheese = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.04, 0.46), new THREE.MeshBasicMaterial({ color: 0xffa502 }));
+  cheese.rotation.y = Math.PI / 4; cheese.position.y = 0.26; addOutline(cheese, 0.06);
+
+  const lettuce = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.06, 14), new THREE.MeshBasicMaterial({ color: 0x2ed573 }));
+  lettuce.position.y = 0.31; addOutline(lettuce, 0.06);
+
+  const bunTop = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10, 0, Math.PI * 2, 0, Math.PI / 1.7), new THREE.MeshBasicMaterial({ color: 0xeccc68 }));
+  bunTop.position.y = 0.36; addOutline(bunTop, 0.06);
+
+  g.add(bunBottom, patty, cheese, lettuce, bunTop);
+  g.scale.setScalar(scale);
+  return g;
+}
+
+/* -------------------------------- Humanoids (stickman.glb) ------------------------------ */
+let stickmanTemplate = null;
+let stickmanClips = null;
+const allMixers = [];
+
+// Builds one animated stickman instance with an optional tinted body,
+// cap, and apron so player / staff / guests stay visually distinct.
+function createHumanoid({ tint = 0xffffff, cap = null, apron = null } = {}) {
+  const root = new THREE.Group();
+
+  const model = SkeletonUtils.clone(stickmanTemplate);
+  model.traverse(o => {
+    if (o.isMesh) {
+      // Force MeshBasicMaterial (scene has no lights) + solid tint color.
+      // Original GLB has a blue emissive + texture that caused invisible / blue-glitch look.
+      o.material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(tint),
+        side: THREE.DoubleSide,
+      });
+      o.frustumCulled = false;
+      o.castShadow = false;
+      o.receiveShadow = false;
+    }
+  });
+  model.rotation.y = STICKMAN_FACING_OFFSET;
+
+  // Normalize scale to a consistent height, then plant feet at y=0
+  // and center horizontally — measured from the real mesh bounds so
+  // it doesn't depend on guessing the source file's internal units.
+  model.updateWorldMatrix(true, true);
+  let box = new THREE.Box3().setFromObject(model);
+  let size = new THREE.Vector3();
+  box.getSize(size);
+  if (size.y > 0) model.scale.setScalar(HUMANOID_HEIGHT / size.y);
+
+  model.updateWorldMatrix(true, true);
+  box = new THREE.Box3().setFromObject(model);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  model.position.x -= center.x;
+  model.position.z -= center.z;
+  model.position.y -= box.min.y;
+
+  root.add(model);
+
+  const mixer = new THREE.AnimationMixer(model);
+  const idleClip = THREE.AnimationClip.findByName(stickmanClips, 'Idle') || stickmanClips[0];
+  const runClip = THREE.AnimationClip.findByName(stickmanClips, 'Run') || stickmanClips[1] || stickmanClips[0];
+  const actions = {
+    idle: mixer.clipAction(idleClip),
+    run: mixer.clipAction(runClip),
+  };
+  actions.idle.play();
+  allMixers.push(mixer);
+
+  if (cap !== null) {
+    const capMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.25, 0.16, 14),
+      new THREE.MeshBasicMaterial({ color: cap })
+    );
+    capMesh.position.set(0, HUMANOID_HEIGHT * 0.97, 0.02);
+    addOutline(capMesh, 0.06);
+    root.add(capMesh);
+  }
+  if (apron !== null) {
+    const apronMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.44, 0.05),
+      new THREE.MeshBasicMaterial({ color: apron })
+    );
+    apronMesh.position.set(0, HUMANOID_HEIGHT * 0.5, 0.19);
+    addOutline(apronMesh, 0.06);
+    root.add(apronMesh);
+  }
+
+  root.userData.mixer = mixer;
+  root.userData.actions = actions;
+  root.userData.activeAction = 'idle';
+  root.userData.walkPhase = Math.random() * 10;
+  return root;
+}
+
+function setHumanoidAction(root, name) {
+  if (root.userData.activeAction === name) return;
+  const actions = root.userData.actions;
+  const next = actions[name];
+  const prev = actions[root.userData.activeAction];
+  next.reset().setEffectiveWeight(1).fadeIn(0.2).play();
+  if (prev) prev.fadeOut(0.2);
+  root.userData.activeAction = name;
+}
+
+/* ----------------------------------- Player -------------------------------- */
+let player = null;
+const trayGroup = new THREE.Group();
+let trayBurgers = [];
+
+function updateTrayVisual(count) {
+  while (trayBurgers.length < count) {
+    const b = createBurger(0.55);
+    b.position.y = trayBurgers.length * 0.19;
+    trayGroup.add(b);
+    trayBurgers.push(b);
+  }
+  while (trayBurgers.length > count) {
+    const b = trayBurgers.pop();
+    trayGroup.remove(b);
+  }
+}
+
+/* -------------------------------- Tables ----------------------------------- */
+const TABLE_SLOTS = [
+  { x: -4.5, z: -1.0, cost: 0 },
+  { x: 0.0, z: -1.0, cost: 0 },
+  { x: 4.5, z: -1.0, cost: 15 },
+  { x: -4.5, z: 2.5, cost: 30 },
+  { x: 0.0, z: 2.5, cost: 45 },
+  { x: 4.5, z: 2.5, cost: 60 },
+];
+
+const tables = [];
+const unlockZones = [];
+
+function createChair(x, z, rotY) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffa502 });
+  const g = new THREE.Group();
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.5), mat);
+  seat.position.y = 0.5; addOutline(seat, 0.08);
+  g.add(seat);
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  return g;
+}
+
+function buildTableMesh() {
+  const g = new THREE.Group();
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.12, 20), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  top.position.y = 0.75; addOutline(top, 0.05);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.7, 10), new THREE.MeshBasicMaterial({ color: 0x70a1ff }));
+  pole.position.y = 0.4; addOutline(pole, 0.08);
+  g.add(top, pole);
+  g.add(createChair(0, -0.95, 0));
+  g.add(createChair(0, 0.95, Math.PI));
+  return g;
+}
+
+function createUnlockPad(pos, cost, label) {
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 0.95, 24), new THREE.MeshBasicMaterial({ color: 0xffa502, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.02;
+  const fill = new THREE.Mesh(new THREE.CircleGeometry(0.73, 24), new THREE.MeshBasicMaterial({ color: 0x2ed573 }));
+  fill.rotation.x = -Math.PI / 2; fill.position.y = 0.015;
+  fill.scale.set(0.001, 0.001, 0.001);
+  g.add(ring, fill);
+
+  const text = makeSprite(`$${cost}`, { fontSize: 56, color: '#ffffff', bg: '#ff4757', scale: 0.9 });
+  text.position.set(0, 1.7, 0); g.add(text);
+
+  g.position.copy(pos);
+  scene.add(g);
+  return { group: g, fill, cost, progress: 0, position: pos.clone(), radius: 1.3, done: false };
+}
+
+TABLE_SLOTS.forEach((slot, i) => {
+  const pos = new THREE.Vector3(slot.x, 0, slot.z);
+  const unlocked = slot.cost === 0;
+  const tableGroup = buildTableMesh();
+  tableGroup.position.copy(pos);
+  tableGroup.scale.setScalar(unlocked ? 1 : 0.001);
+  tableGroup.visible = unlocked;
+  scene.add(tableGroup);
+
+  const table = { mesh: tableGroup, position: pos, seatOffset: new THREE.Vector3(0, 0, 1.3), unlocked, occupied: false, customer: null, index: i };
+  tables.push(table);
+
+  if (!unlocked) {
+    const zone = createUnlockPad(pos, slot.cost, 'Unlock Table');
+    zone.type = 'table';
+    zone.tableIndex = i;
+    unlockZones.push(zone);
+  }
+});
+
+/* -------------------------------- Hire Worker Pad --------------------------- */
+const HIRE_BASE_COST = 30;
+let workerPad = null;
+function spawnWorkerPad() {
+  const cost = HIRE_BASE_COST + state.workers * 30;
+  const pos = new THREE.Vector3(-3.0, 0, -3.6);
+  workerPad = createUnlockPad(pos, cost, 'Hire Worker');
+  workerPad.type = 'worker';
+  unlockZones.push(workerPad);
+}
+spawnWorkerPad();
+
+/* ----------------------------------- Workers -------------------------------- */
+const workers = [];
+function hireWorker() {
+  const w = createHumanoid({ tint: 0x70a1ff, cap: 0x1e90ff, apron: 0x1e90ff });
+  w.position.set(-3 + Math.random() * 1.5, 0, -3.0);
+  scene.add(w);
+  const trayG = new THREE.Group();
+  trayG.position.set(0, 2.15, 0);
+  w.add(trayG);
+  workers.push({
+    group: w, tray: trayG, trayMeshes: [], carrying: 0,
+    state: 'toGrill', target: null, grillTimer: 0, serveTimer: 0, speed: 2.8,
+  });
+  state.workers++;
+  document.getElementById('workerCount').textContent = state.workers;
+}
+
+function updateWorkerTray(w) {
+  while (w.trayMeshes.length < w.carrying) {
+    const b = createBurger(0.5);
+    b.position.y = w.trayMeshes.length * 0.18;
+    w.tray.add(b);
+    w.trayMeshes.push(b);
+  }
+  while (w.trayMeshes.length > w.carrying) {
+    const b = w.trayMeshes.pop();
+    w.tray.remove(b);
+  }
+}
+
+/* --------------------------------- Customers -------------------------------- */
+const customers = [];
+const cashPickups = [];
+
+const SHIRT_COLORS = [0xff4757, 0x2ed573, 0x1e90ff, 0xffa502, 0x9b59b6, 0xff6b81];
+
+function findFreeTable() {
+  const free = tables.filter(t => t.unlocked && !t.occupied);
+  if (free.length === 0) return null;
+  return free[Math.floor(Math.random() * free.length)];
+}
+
+function spawnCustomer() {
+  const table = findFreeTable();
+  if (!table) return;
+  table.occupied = true;
+
+  const cust = createHumanoid({
+    tint: SHIRT_COLORS[Math.floor(Math.random() * SHIRT_COLORS.length)],
+  });
+  cust.position.copy(DOOR_POS);
+  scene.add(cust);
+
+  const bubble = makeSprite('🍔', { fontSize: 70, bg: '#ffffff', scale: 0.8 });
+  bubble.position.set(0, 2.5, 0); cust.add(bubble); bubble.visible = false;
+
+  const needed = 1 + Math.floor(Math.random() * 3);
+  const needText = makeSprite(`x${needed}`, { fontSize: 44, color: '#ff4757', bg: '#ffffff', scale: 0.5 });
+  needText.position.set(0.5, 2.55, 0); cust.add(needText); needText.visible = false;
+
+  const seatPos = table.position.clone().add(table.seatOffset);
+
+  customers.push({
+    group: cust, bubble, needText, table, needed, served: 0,
+    state: 'walkingIn', target: seatPos, patience: 26, eatTimer: 0, speed: 2.3,
+  });
+}
+
+function spawnCashPickup(pos) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x2ed573 });
+  for (let i = 0; i < 3; i++) {
+    const bill = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.05, 0.24), mat);
+    bill.position.y = 0.15 + i * 0.06;
+    addOutline(bill, 0.08);
+    g.add(bill);
+  }
+  g.position.copy(pos); g.position.y = 0;
+  scene.add(g);
+  cashPickups.push({ group: g, value: 10 + Math.floor(Math.random() * 10), life: 0 });
+}
+
+/* --------------------------------- Toast Helper ------------------------------ */
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
+/* ------------------------------------ JOYSTICK LOGIC ----------------------------------- */
+window.addEventListener('keydown', e => { state.keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', e => { state.keys[e.key.toLowerCase()] = false; });
+
+const joyBase = document.getElementById('joystickBase');
+const joyKnob = document.getElementById('joystickKnob');
+let joyTouchId = null;
+
+function joyStart(x, y, id) {
+  joyTouchId = id; state.joystick.active = true; updateJoy(x, y);
+}
+
+function updateJoy(x, y) {
+  const rect = joyBase.getBoundingClientRect();
+  const radius = rect.width / 2;
+  const cx = rect.left + radius;
+  const cy = rect.top + radius;
+
+  let dx = x - cx; let dy = y - cy;
+  const dist = Math.hypot(dx, dy);
+  const maxDist = radius - 10;
+  if (dist > maxDist) {
+    dx = (dx / dist) * maxDist;
+    dy = (dy / dist) * maxDist;
+  }
+
+  joyKnob.style.transform = `translate(${dx}px, ${dy}px) translate(-50%, -50%)`;
+  joyKnob.style.left = '50%'; joyKnob.style.top = '50%';
+  state.joystick.x = dx / maxDist;
+  state.joystick.y = dy / maxDist;
+}
+
+function joyEnd() {
+  joyTouchId = null; state.joystick.active = false;
+  state.joystick.x = 0; state.joystick.y = 0;
+  joyKnob.style.left = '50%'; joyKnob.style.top = '50%';
+  joyKnob.style.transform = 'translate(-50%, -50%)';
+}
+
+joyBase.addEventListener('touchstart', e => {
+  e.preventDefault(); const t = e.changedTouches[0]; joyStart(t.clientX, t.clientY, t.identifier);
+}, { passive: false });
+
+joyBase.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) if (t.identifier === joyTouchId) updateJoy(t.clientX, t.clientY);
+}, { passive: false });
+
+window.addEventListener('touchend', e => {
+  for (const t of e.changedTouches) if (t.identifier === joyTouchId) joyEnd();
+});
+
+let mouseDown = false;
+joyBase.addEventListener('mousedown', e => { mouseDown = true; joyStart(e.clientX, e.clientY, 'mouse'); });
+window.addEventListener('mousemove', e => { if (mouseDown) updateJoy(e.clientX, e.clientY); });
+window.addEventListener('mouseup', () => { if (mouseDown) { mouseDown = false; joyEnd(); } });
+
+/* ------------------------------------ Update Player & Camera --------------------------- */
+let playerFacing = 0;
+
+function updatePlayerAndCamera(delta) {
+  let mx = 0, mz = 0;
+  if (state.keys['w'] || state.keys['arrowup']) mz -= 1;
+  if (state.keys['s'] || state.keys['arrowdown']) mz += 1;
+  if (state.keys['a'] || state.keys['arrowleft']) mx -= 1;
+  if (state.keys['d'] || state.keys['arrowright']) mx += 1;
+
+  mx += state.joystick.x; mz += state.joystick.y;
+
+  const len = Math.hypot(mx, mz);
+  if (len > 0.05) {
+    mx /= len; mz /= len;
+    const speed = 4.8;
+    player.position.x += mx * speed * delta;
+    player.position.z += mz * speed * delta;
+    player.position.x = THREE.MathUtils.clamp(player.position.x, -FLOOR_HALF_X + 0.5, FLOOR_HALF_X - 0.5);
+    player.position.z = THREE.MathUtils.clamp(player.position.z, FLOOR_MIN_Z + 0.5, FLOOR_MAX_Z + 0.3);
+
+    const targetAngle = Math.atan2(mx, mz);
+    playerFacing = THREE.MathUtils.lerp(playerFacing, targetAngle, 0.25);
+    player.rotation.y = playerFacing;
+
+    setHumanoidAction(player, 'run');
+  } else {
+    setHumanoidAction(player, 'idle');
+  }
+
+  const targetCamPos = player.position.clone().add(CAM_OFFSET);
+  camera.position.lerp(targetCamPos, 0.1);
+  camera.lookAt(player.position.x, 0.5, player.position.z);
+}
+
+/* ------------------------------------ Update Interactions ----------------------------- */
+function updatePlayerGrill(delta) {
+  const dist = player.position.distanceTo(grillZone.position);
+  if (dist < grillZone.radius && state.playerCarrying < state.maxCarry) {
+    state.grillTimer += delta;
+    if (state.grillTimer >= 0.35) {
+      state.grillTimer = 0;
+      state.playerCarrying = Math.min(state.maxCarry, state.playerCarrying + 1);
+      updateTrayVisual(state.playerCarrying);
+    }
+  } else state.grillTimer = 0;
+}
+
+function updatePlayerServing(delta) {
+  if (state.playerCarrying <= 0) { state.serveTimer = 0; return; }
+  let servedThisFrame = false;
+  for (const cust of customers) {
+    if (cust.state !== 'seated' || cust.served >= cust.needed) continue;
+    if (player.position.distanceTo(cust.table.position) < 2.1) {
+      state.serveTimer += delta;
+      if (state.serveTimer >= 0.25) {
+        state.serveTimer = 0;
+        state.playerCarrying--;
+        cust.served++;
+        updateTrayVisual(state.playerCarrying);
+        if (cust.served >= cust.needed) {
+          cust.state = 'eating'; cust.eatTimer = 0;
+          cust.bubble.visible = false; cust.needText.visible = false;
+          setHumanoidAction(cust.group, 'idle');
+        }
+      }
+      servedThisFrame = true; break;
+    }
+  }
+  if (!servedThisFrame) state.serveTimer = 0;
+}
+
+function updateCustomers(delta) {
+  for (let i = customers.length - 1; i >= 0; i--) {
+    const c = customers[i]; const g = c.group;
+    if (c.state === 'walkingIn' || c.state === 'walkingOut') {
+      const dir = new THREE.Vector3().subVectors(c.target, g.position); dir.y = 0;
+      if (dir.length() > 0.15) {
+        dir.normalize();
+        g.position.x += dir.x * c.speed * delta;
+        g.position.z += dir.z * c.speed * delta;
+        g.rotation.y = THREE.MathUtils.lerp(g.rotation.y, Math.atan2(dir.x, dir.z), 0.2);
+        setHumanoidAction(g, 'run');
+      } else {
+        setHumanoidAction(g, 'idle');
+        if (c.state === 'walkingIn') {
+          c.state = 'seated'; g.rotation.y = Math.PI;
+          c.bubble.visible = true; c.needText.visible = true;
+        } else {
+          scene.remove(g); customers.splice(i, 1);
+        }
+      }
+      continue;
+    }
+    if (c.state === 'seated') {
+      c.patience -= delta;
+      if (c.patience <= 0) {
+        c.table.occupied = false; c.bubble.visible = false; c.needText.visible = false;
+        c.state = 'walkingOut'; c.target = DOOR_POS.clone();
+      }
+      continue;
+    }
+    if (c.state === 'eating') {
+      c.eatTimer += delta;
+      if (c.eatTimer >= 1.5) {
+        spawnCashPickup(c.table.position.clone().add(new THREE.Vector3(0.9, 0, 0.9)));
+        c.table.occupied = false; c.state = 'walkingOut'; c.target = DOOR_POS.clone();
+      }
+    }
+  }
+}
+
+function updateWorkers(delta) {
+  for (const w of workers) {
+    const g = w.group;
+    if (w.state === 'toGrill') {
+      const dir = new THREE.Vector3().subVectors(grillZone.position, g.position); dir.y = 0;
+      if (dir.length() > 1.6) {
+        dir.normalize();
+        g.position.x += dir.x * w.speed * delta;
+        g.position.z += dir.z * w.speed * delta;
+        g.rotation.y = THREE.MathUtils.lerp(g.rotation.y, Math.atan2(dir.x, dir.z), 0.2);
+        setHumanoidAction(g, 'run');
+      } else {
+        setHumanoidAction(g, 'idle');
+        w.grillTimer += delta;
+        if (w.grillTimer >= 0.3 && w.carrying < 4) {
+          w.grillTimer = 0; w.carrying++; updateWorkerTray(w);
+        }
+        if (w.carrying >= 2) {
+          const target = customers.find(c => c.state === 'seated' && c.served < c.needed);
+          if (target) { w.state = 'toCustomer'; w.targetCustomer = target; }
+        }
+      }
+      continue;
+    }
+    if (w.state === 'toCustomer') {
+      const target = w.targetCustomer;
+      if (!target || target.state !== 'seated' || target.served >= target.needed) { w.state = 'toGrill'; continue; }
+      const dir = new THREE.Vector3().subVectors(target.table.position, g.position); dir.y = 0;
+      if (dir.length() > 2.0) {
+        dir.normalize();
+        g.position.x += dir.x * w.speed * delta;
+        g.position.z += dir.z * w.speed * delta;
+        g.rotation.y = THREE.MathUtils.lerp(g.rotation.y, Math.atan2(dir.x, dir.z), 0.2);
+        setHumanoidAction(g, 'run');
+      } else {
+        setHumanoidAction(g, 'idle');
+        w.serveTimer += delta;
+        if (w.serveTimer >= 0.25 && w.carrying > 0) {
+          w.serveTimer = 0; w.carrying--; target.served++; updateWorkerTray(w);
+          if (target.served >= target.needed) {
+            target.state = 'eating'; target.eatTimer = 0;
+            target.bubble.visible = false; target.needText.visible = false;
+            setHumanoidAction(target.group, 'idle');
+            w.state = 'toGrill';
+          }
+        }
+        if (w.carrying <= 0) w.state = 'toGrill';
+      }
+    }
+  }
+}
+
+function updateCashPickups(delta) {
+  for (let i = cashPickups.length - 1; i >= 0; i--) {
+    const p = cashPickups[i]; p.life += delta;
+    p.group.rotation.y += delta * 2;
+    p.group.position.y = 0.05 + Math.sin(p.life * 4) * 0.05;
+    if (player.position.distanceTo(p.group.position) < 1.1) {
+      state.cash += p.value;
+      scene.remove(p.group);
+      cashPickups.splice(i, 1);
+    }
+  }
+}
+
+function unlockTable(index) {
+  const table = tables[index];
+  table.unlocked = true; table.mesh.visible = true; table.mesh.scale.setScalar(1);
+  showToast('Table Unlocked! 🍽️'); updateTableCounter();
+}
+
+function unlockWorker() {
+  hireWorker(); showToast('Worker Hired! 👨‍🍳');
+  const idx = unlockZones.indexOf(workerPad);
+  if (idx >= 0) unlockZones.splice(idx, 1);
+  scene.remove(workerPad.group);
+  if (state.workers < state.maxWorkers) spawnWorkerPad(); else workerPad = null;
+}
+
+function updateUnlockZones(delta) {
+  for (const zone of unlockZones) {
+    if (zone.done) continue;
+    if (player.position.distanceTo(zone.position) < zone.radius && state.cash > 0) {
+      const drain = Math.min(80 * delta, state.cash, zone.cost - zone.progress);
+      state.cash -= drain; zone.progress += drain;
+      const frac = zone.progress / zone.cost;
+      zone.fill.scale.set(frac, frac, frac);
+      if (zone.progress >= zone.cost - 0.001) {
+        zone.done = true; scene.remove(zone.group);
+        if (zone.type === 'table') unlockTable(zone.tableIndex);
+        if (zone.type === 'worker') unlockWorker();
+      }
+    }
+  }
+  for (let i = unlockZones.length - 1; i >= 0; i--) if (unlockZones[i].done) unlockZones.splice(i, 1);
+}
+
+function updateTableCounter() {
+  document.getElementById('tableCount').textContent = `${tables.filter(t => t.unlocked).length}/${tables.length}`;
+}
+updateTableCounter();
+
+function onResize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  setCameraFrustum();
+}
+window.addEventListener('resize', onResize);
+onResize();
+
+/* ------------------------------------ Main Loop ----------------------------------------- */
+let gameStarted = false;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = Math.min(state.clock.getDelta(), 0.05);
+  if (!gameStarted) { renderer.render(scene, camera); return; }
+
+  allMixers.forEach(m => m.update(delta));
+
+  updatePlayerAndCamera(delta);
+  updatePlayerGrill(delta);
+  updatePlayerServing(delta);
+  updateCustomers(delta);
+  updateWorkers(delta);
+  updateCashPickups(delta);
+  updateUnlockZones(delta);
+
+  state.spawnTimer += delta;
+  if (state.spawnTimer >= state.spawnInterval) { state.spawnTimer = 0; spawnCustomer(); }
+
+  document.getElementById('cashVal').textContent = Math.floor(state.cash);
+  renderer.render(scene, camera);
+}
+animate();
+
+/* ------------------------------------ Model loading & game start ------------------------ */
+const loader = new GLTFLoader();
+loader.load(
+  'stickman.glb',
+  (gltf) => {
+    stickmanTemplate = gltf.scene;
+    stickmanClips = gltf.animations;
+
+    player = createHumanoid({ tint: 0xffffff, cap: 0xff4757, apron: 0xff4757 });
+    player.position.set(0, 0, 2.5);
+    scene.add(player);
+    trayGroup.position.set(0, 2.15, 0);
+    player.add(trayGroup);
+
+    camera.position.copy(player.position.clone().add(CAM_OFFSET));
+    camera.lookAt(player.position.x, 0.5, player.position.z);
+
+    gameStarted = true;
+    document.getElementById('loadingOverlay').classList.add('hidden');
+  },
+  undefined, // onProgress
+  (err) => {
+    console.error('Failed to load stickman.glb', err);
+    document.getElementById('loadingText').textContent = 'Could not load character model 😕';
+  }
+);
+
+</script>
+</body>
+</html>
